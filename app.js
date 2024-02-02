@@ -1,61 +1,214 @@
-const express = require("express");
+const express = require('express');
+const axios = require('axios');
+const bodyParser = require('body-parser');
+var cors = require('cors');
+
 const app = express();
-const port = process.env.PORT || 3001;
+const port = 3001;
 
-app.get("/", (req, res) => res.type('html').send(html));
+app.use(bodyParser.json());
+app.use(cors({ origin: '*' })); 
 
-const server = app.listen(port, () => console.log(`Example app listening on port ${port}!`));
+app.get('/getTokenDetails', async (req, res) => {
+  try {
+    // Assuming you receive tokenAddress from the React app as a query parameter
+    const tokenAddress = req.query.tokenAddress;
+    const headers = {
+      'X-QKNTL-KEY': '02eb21a1cc4c49ecb34a9f074fdeebe8',
+    };
+    // Make the POST request to the external API
+    const response = await axios.post('https://api.quickintel.io/v1/getquickiauditfull', {
+      chain: 'eth', // 'eth' is hardcoded based on your requirements
+      tokenAddress: tokenAddress,
+    }, {headers});
 
-server.keepAliveTimeout = 120 * 1000;
-server.headersTimeout = 120 * 1000;
+    //console.log(response);
+    // Extract the required information from the response
+    const {
+      tokenDetails: { tokenName, tokenSymbol, tokenOwner, tokenSupply },
+      tokenDynamicDetails: { is_Honeypot, lp_Locks },
+    } = response.data;
 
-const html = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Hello from Render!</title>
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
-    <script>
-      setTimeout(() => {
-        confetti({
-          particleCount: 100,
-          spread: 70,
-          origin: { y: 0.6 },
-          disableForReducedMotion: true
-        });
-      }, 500);
-    </script>
-    <style>
-      @import url("https://p.typekit.net/p.css?s=1&k=vnd5zic&ht=tk&f=39475.39476.39477.39478.39479.39480.39481.39482&a=18673890&app=typekit&e=css");
-      @font-face {
-        font-family: "neo-sans";
-        src: url("https://use.typekit.net/af/00ac0a/00000000000000003b9b2033/27/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n7&v=3") format("woff2"), url("https://use.typekit.net/af/00ac0a/00000000000000003b9b2033/27/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n7&v=3") format("woff"), url("https://use.typekit.net/af/00ac0a/00000000000000003b9b2033/27/a?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n7&v=3") format("opentype");
-        font-style: normal;
-        font-weight: 700;
+    // Construct the object to be returned
+    const result = {
+      tokenName: tokenName,
+      tokenSymbol: tokenSymbol,
+      tokenOwner: tokenOwner,
+      tokenSupply: tokenSupply,
+      isHoneypot: is_Honeypot,
+      lpLocks: lp_Locks !== null ? lp_Locks : "Burned",
+    };
+
+    // console.log(result);
+    // Send the result back to the React app
+    res.json(result);
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/getTokenEvents', async (req, res) => {
+  try {
+    // Make the GET request to the CoinMarketCal API
+    const response = await axios.get('https://developers.coinmarketcal.com/v1/events', {
+      headers: {
+        'x-api-key': 'CO9FGdFk1s3vS3PuPY4XV5tJU43PBeuC8V5QUBqx',
+        'Accept-Encoding': 'deflate, gzip',
+        'Accept': 'application/json',
+      },
+    });
+
+    // Extract the top 6 events from the response
+    const top5Events = response.data.body.slice(0, 4).map(event => ({
+      title: event.title.en,
+      fullname: event.coins[0].fullname,
+    }));
+
+    // Send the top 5 events back to the React app
+    res.json(top5Events);
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Endpoint for getting top gainers
+app.get('/getTopGainers', async (req, res) => {
+  try {
+    // Make the POST request to the Defined.fi GraphQL API
+    const response = await axios.post(
+      'https://graph.defined.fi/graphql',
+      {
+        query: `
+          {
+            listTopTokens(limit: 10, networkFilter: 1, resolution: "1D") {
+              address
+              decimals
+              exchanges {
+                address
+                id
+                name
+                iconUrl
+                networkId
+                tradeUrl
+              }
+              id
+              liquidity
+              name
+              networkId
+              price
+              priceChange
+              priceChange1
+              priceChange4
+              priceChange12
+              priceChange24
+              resolution
+              symbol
+              topPairId
+              volume
+            }
+          }
+        `,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: '7b7401b9f6ca72eeb7fd977c113dc0dd20b1c034',
+        },
       }
-      html {
-        font-family: neo-sans;
-        font-weight: 700;
-        font-size: calc(62rem / 16);
+    );
+
+    // Extract relevant data from the response
+    const topGainers = response.data.data.listTopTokens.map(token => ({
+      name: token.name,
+      symbol: token.symbol,
+      price: token.price,
+      priceChange: token.priceChange,
+      priceChange1: token.priceChange1,
+      priceChange4: token.priceChange4,
+      priceChange12: token.priceChange12,
+      priceChange24: token.priceChange24,
+      volume: token.volume,
+    }));
+
+    // Send the top gainers back to the React app
+    res.json(topGainers);
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/getLatestTokens', async (req, res) => {
+  try {
+    // Make the POST request to the Defined.fi GraphQL API
+    const response = await axios.post(
+      'https://graph.defined.fi/graphql',
+      {
+        query: `
+          {
+            getLatestTokens(limit: 5, networkFilter: 1) {
+              items {
+                id
+                tokenAddress
+                networkId
+                blockNumber
+                transactionIndex
+                traceIndex
+                transactionHash
+                blockHash
+                timeCreated
+                creatorAddress
+                creatorBalance
+                tokenName
+                totalSupply
+                tokenSymbol
+                decimals
+                simulationResults {
+                  buySuccess
+                  buyTax
+                  buyGasUsed
+                  sellSuccess
+                  sellTax
+                  sellGasUsed
+                  canTransferOwnership
+                  canRenounceOwnership
+                  isOwnerRenounced
+                  openTradingCall
+                }
+              }
+            }
+          }
+        `,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: '57efd78a3f4001cdd24b36f13358e407e86e4f22',
+        },
       }
-      body {
-        background: white;
-      }
-      section {
-        border-radius: 1em;
-        padding: 1em;
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        margin-right: -50%;
-        transform: translate(-50%, -50%);
-      }
-    </style>
-  </head>
-  <body>
-    <section>
-      Hello from Render!
-    </section>
-  </body>
-</html>
-`
+    );
+
+    //console.log(response.data)
+
+    // // Extract relevant data from the response
+    // const latestTokens = response.data.data.getLatestTokens.items.map(token => ({
+    //   id: token.id,
+    //   tokenAddress: token.tokenAddress,
+    //   networkId: token.networkId,
+    //   blockNumber: token.blockNumber,
+    //   transactionIndex: token.transactionIndex,
+    //   // ... (add more fields as needed)
+    // }));
+
+    // Send the latest tokens back to the React app
+    res.json(latestTokens);
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running on port ${port}`);
+});
